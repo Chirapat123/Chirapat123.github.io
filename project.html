@@ -46,7 +46,7 @@
       scene.add(directionalLight);
 
       const exrSkyboxUrl =
-        "http://chirapat123.github.io/qwantani_dusk_2_puresky_1k.exr";
+        "https://chirapat123.github.io/qwantani_dusk_2_puresky_1k.exr";
       const pmremGenerator = new THREE.PMREMGenerator(renderer);
       pmremGenerator.compileEquirectangularShader();
 
@@ -82,10 +82,6 @@
       let goalCamPos = null; // ตำแหน่งกล้องปลายทาง
       let goalTarget = null; // จุดที่กล้องมองปลายทาง
 
-      // ถ้ารู้ชื่อ mesh ของป้าย ให้ใส่ที่นี่ เช่น ['Sign', 'Board']
-      // ถ้าเว้นว่างไว้ จะกดได้ทุก mesh (ดูชื่อจาก console.log แล้วค่อยมาใส่)
-      const SIGN_NAMES = [];
-
       loader.load("https://chirapat123.github.io/SwordNew.glb", (gltf) => {
         const model = gltf.scene;
         model.position.set(-8, -10, 30);
@@ -97,15 +93,14 @@
             child.castShadow = true;
             child.receiveShadow = true;
 
-            const ok =
-              SIGN_NAMES.length === 0 || SIGN_NAMES.includes(child.name);
-            if (ok) pickables.push(child);
+            // [แก้] กดได้เฉพาะ mesh ที่ material มี texture (รูป)
+            if (child.material && child.material.map) pickables.push(child);
           }
         });
 
         mixer = new THREE.AnimationMixer(model);
         gltf.animations.forEach((clip) => {
-          mixer.clipAction(clip).play(); 
+          mixer.clipAction(clip).play();
         });
       });
 
@@ -129,10 +124,12 @@
         }
 
         console.log("Picked:", hit.object.name, hit.object);
-        zoomTo(hit.object);
+        zoomTo(hit); // [แก้] ส่ง hit ทั้งก้อน เพื่อใช้ normal ของหน้ารูป
       }
 
-      function zoomTo(object) {
+      function zoomTo(hit) {
+        const object = hit.object;
+
         // หาจุดกึ่งกลางและขนาดในพิกัดโลก
         const box = new THREE.Box3().setFromObject(object);
         const center = box.getCenter(new THREE.Vector3());
@@ -143,8 +140,12 @@
         const fov = THREE.MathUtils.degToRad(camera.fov);
         const distance = (maxSize / 2 / Math.tan(fov / 2)) * 1.5;
 
-        // ให้กล้องอยู่ฝั่งเดิม (ทิศจากวัตถุมาหากล้อง) แค่ขยับเข้าใกล้
-        const dir = camera.position.clone().sub(center).normalize();
+        // [แก้] ให้กล้องไปอยู่หน้ารูป ตามทิศ normal ของหน้ารูป
+        const dir = hit.face.normal
+          .clone()
+          .transformDirection(object.matrixWorld)
+          .normalize();
+        if (dir.dot(camera.position.clone().sub(center)) < 0) dir.negate();
 
         goalTarget = center;
         goalCamPos = center.clone().add(dir.multiplyScalar(distance));
