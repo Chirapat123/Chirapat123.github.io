@@ -1,100 +1,188 @@
+
 <!doctype html>
 <html>
-  <head>
-    <title>Animations</title>
-    <style>
-      body {
-        margin: 0;
-        overflow: hidden;
+<head>
+  <title>Animations</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
+
+  <script>
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+
+    const camera = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
+    camera.position.set(0, 2, -10);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableRotate = true;
+    controls.enableZoom = true;
+    controls.enablePan = true;
+
+    // หมอก Shader
+    const fogUniforms = {
+      uTime: { value: 0 }
+    };
+
+    const fogVertexShader = `
+      uniform float uTime;
+      varying vec2 vUv;
+
+      void main() {
+        vUv = uv;
+
+        vec3 pos = position;
+
+        float wave1 = sin(pos.x * 0.12 + uTime * 0.8);
+        float wave2 = cos(pos.y * 0.18 - uTime * 0.5);
+        float wave3 = sin(pos.x * 0.25 + pos.y * 0.15 + uTime);
+
+        pos.z += wave1 * 1.2 + wave2 * 0.7 + wave3 * 0.3;
+
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
       }
-    </style>
-  </head>
+    `;
 
-  <body>
-    <!-- core three.js -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
+    const fogFragmentShader = `
+      uniform float uTime;
+      varying vec2 vUv;
 
-    <script>
-      const renderer = new THREE.WebGLRenderer();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.shadowMap.enabled = true; // Shadow
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      document.body.appendChild(renderer.domElement);
+      float random(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
 
-      const scene = new THREE.Scene();
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
 
-      const camera = new THREE.PerspectiveCamera(
-        75,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        1000,
-      );
-      camera.position.set(0, 2, -10);
-      camera.lookAt(0, 0, -0);
-      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        float a = random(i);
+        float b = random(i + vec2(1.0, 0.0));
+        float c = random(i + vec2(0.0, 1.0));
+        float d = random(i + vec2(1.0, 1.0));
 
-      const abmientLight = new THREE.AmbientLight(0x404040, 1); // soft white light
-      scene.add(abmientLight);
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
 
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-      directionalLight.position.set(10, 10, 10);
-      directionalLight.castShadow = true;
-      scene.add(directionalLight);
+      void main() {
+        vec2 uv = vUv * 7.0;
+        uv.x += uTime * 0.08;
+        uv.y += sin(uTime * 0.2 + uv.x) * 0.15;
 
-      const exrSkyboxUrl =
-        "https://chirapat123.github.io/qwantani_dusk_2_puresky_1k.exr";
-      const pmremGenerator = new THREE.PMREMGenerator(renderer);
-      pmremGenerator.compileEquirectangularShader();
+        float n = noise(uv) * 0.6
+                + noise(uv * 2.0 - uTime * 0.04) * 0.4;
 
-      new THREE.EXRLoader().setDataType(THREE.UnsignedByteType).load(
-        exrSkyboxUrl,
+        vec3 darkFog = mix(
+          vec3(0.005, 0.005, 0.008),
+          vec3(0.12, 0.13, 0.16),
+          smoothstep(0.25, 0.8, n)
+        );
+
+        float alpha = smoothstep(0.15, 0.65, n) * 0.95;
+
+        float edge = smoothstep(0.0, 0.08, vUv.x)
+                   * smoothstep(0.0, 0.08, 1.0 - vUv.x)
+                   * smoothstep(0.0, 0.08, vUv.y)
+                   * smoothstep(0.0, 0.08, 1.0 - vUv.y);
+
+        gl_FragColor = vec4(darkFog, alpha * edge);
+      }
+    `;
+
+    const fogMaterial = new THREE.ShaderMaterial({
+      uniforms: fogUniforms,
+      vertexShader: fogVertexShader,
+      fragmentShader: fogFragmentShader,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+
+    const fogSea = new THREE.Mesh(
+      new THREE.PlaneGeometry(200, 200, 100, 100),
+      fogMaterial
+    );
+    fogSea.rotation.x = -Math.PI / 2;
+    fogSea.position.set(0, -7, 20);
+    scene.add(fogSea);
+
+    // แสง
+    scene.add(new THREE.AmbientLight(0x404040, 1));
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    directionalLight.position.set(10, 10, 10);
+    directionalLight.castShadow = true;
+    scene.add(directionalLight);
+
+    // Skybox
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+
+    new THREE.EXRLoader()
+      .setDataType(THREE.UnsignedByteType)
+      .load(
+        "https://chirapat123.github.io/qwantani_dusk_2_puresky_1k.exr",
         (texture) => {
           const skybox = pmremGenerator.fromEquirectangular(texture).texture;
           scene.background = skybox;
           scene.environment = skybox;
-
           texture.dispose();
           pmremGenerator.dispose();
         },
         undefined,
-        (error) => {
-          console.error("Unable to load EXR skybox:", error);
-        },
+        (error) => console.error("Unable to load EXR skybox:", error)
       );
 
-      //load glb และใช้ pbr material
-      const clock = new THREE.Clock();
-      let mixer;
-      const loader = new THREE.GLTFLoader();
+    // โหลดโมเดล
+    const clock = new THREE.Clock();
+    const loader = new THREE.GLTFLoader();
+    const pickables = [];
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
 
-      // ---------- ส่วน picking ----------
-      const pickables = [];
-      const raycaster = new THREE.Raycaster();
-      const pointer = new THREE.Vector2();
+    let mixer;
+    let goalCamPos = null;
+    let goalTarget = null;
+    let previousCamPos = null;
+    let previousTarget = null;
+    let isZoomed = false;
 
-      // สถานะการซูม
-      const defaultCamPos = camera.position.clone();
-      const defaultTarget = controls.target.clone();
-      let goalCamPos = null; // ตำแหน่งกล้องปลายทาง
-      let goalTarget = null; // จุดที่กล้องมองปลายทาง
-
-      loader.load("https://chirapat123.github.io/SwordNew.glb", (gltf) => {
+    loader.load(
+      "https://chirapat123.github.io/SwordNew.glb",
+      (gltf) => {
         const model = gltf.scene;
         model.position.set(-8, -10, 30);
         model.scale.set(3, 3, 3);
         scene.add(model);
 
         model.traverse((child) => {
-          if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
+          if (!child.isMesh) return;
 
-            // [แก้] กดได้เฉพาะ mesh ที่ material มี texture (รูป)
-            if (child.material && child.material.map) pickables.push(child);
+          child.castShadow = true;
+          child.receiveShadow = true;
+
+          if (child.material && child.material.map) {
+            pickables.push(child);
           }
         });
 
@@ -102,81 +190,90 @@
         gltf.animations.forEach((clip) => {
           mixer.clipAction(clip).play();
         });
-      });
+      }
+    );
 
-      renderer.domElement.addEventListener("click", onPick);
+    // คลิกเพื่อซูม หรือคลิกพื้นที่ว่างเพื่อกลับ
+    renderer.domElement.addEventListener("click", (e) => {
+      if (goalCamPos) return;
 
-      function onPick(e) {
-        const r = renderer.domElement.getBoundingClientRect();
-        const x = e.clientX - r.left;
-        const y = e.clientY - r.top;
-        pointer.x = (x / r.width) * 2 - 1;
-        pointer.y = -(y / r.height) * 2 + 1;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-        raycaster.setFromCamera(pointer, camera);
-        const hit = raycaster.intersectObjects(pickables, false)[0];
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObjects(pickables, false)[0];
 
-        if (!hit) {
-          // กดที่ว่าง = กลับมุมมองเดิม
-          goalCamPos = defaultCamPos.clone();
-          goalTarget = defaultTarget.clone();
-          return;
+      if (!hit) {
+        if (isZoomed && previousCamPos && previousTarget) {
+          goalCamPos = previousCamPos.clone();
+          goalTarget = previousTarget.clone();
+          isZoomed = false;
         }
-
-        console.log("Picked:", hit.object.name, hit.object);
-        zoomTo(hit); // [แก้] ส่ง hit ทั้งก้อน เพื่อใช้ normal ของหน้ารูป
+        return;
       }
 
-      function zoomTo(hit) {
-        const object = hit.object;
-
-        // หาจุดกึ่งกลางและขนาดในพิกัดโลก
-        const box = new THREE.Box3().setFromObject(object);
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-
-        // ระยะกล้องให้พอดีกับขนาดวัตถุ
-        const maxSize = Math.max(size.x, size.y, size.z);
-        const fov = THREE.MathUtils.degToRad(camera.fov);
-        const distance = (maxSize / 2 / Math.tan(fov / 2)) * 1.5;
-
-        // [แก้] ให้กล้องไปอยู่หน้ารูป ตามทิศ normal ของหน้ารูป
-        const dir = hit.face.normal
-          .clone()
-          .transformDirection(object.matrixWorld)
-          .normalize();
-        if (dir.dot(camera.position.clone().sub(center)) < 0) dir.negate();
-
-        goalTarget = center;
-        goalCamPos = center.clone().add(dir.multiplyScalar(distance));
+      if (!isZoomed) {
+        previousCamPos = camera.position.clone();
+        previousTarget = controls.target.clone();
       }
 
-      function animate(t) {
-        const delta = clock.getDelta();
-        if (mixer) mixer.update(delta);
+      isZoomed = true;
 
-        // ค่อย ๆ เลื่อนกล้องไปหาเป้าหมาย
-        if (goalCamPos && goalTarget) {
-          camera.position.lerp(goalCamPos, 0.08);
-          controls.target.lerp(goalTarget, 0.08);
+      const box = new THREE.Box3().setFromObject(hit.object);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const maxSize = Math.max(size.x, size.y, size.z);
+      const fov = THREE.MathUtils.degToRad(camera.fov);
+      const distance = (maxSize / 2 / Math.tan(fov / 2)) * 1.5;
 
-          if (camera.position.distanceTo(goalCamPos) < 0.01) {
-            goalCamPos = null; // ถึงแล้ว ปล่อยให้ผู้ใช้หมุนกล้องต่อได้
-            goalTarget = null;
-          }
+      const dir = hit.face.normal
+        .clone()
+        .transformDirection(hit.object.matrixWorld)
+        .normalize();
+
+      if (dir.dot(camera.position.clone().sub(center)) < 0) {
+        dir.negate();
+      }
+
+      goalTarget = center;
+      goalCamPos = center.clone().add(dir.multiplyScalar(distance));
+    });
+
+    // Animation และการเคลื่อนกล้อง
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = clock.getDelta();
+      fogUniforms.uTime.value += delta;
+      if (mixer) mixer.update(delta);
+
+      if (goalCamPos && goalTarget) {
+        camera.position.lerp(goalCamPos, 0.08);
+        controls.target.lerp(goalTarget, 0.08);
+
+        if (
+          camera.position.distanceTo(goalCamPos) < 0.02 &&
+          controls.target.distanceTo(goalTarget) < 0.02
+        ) {
+          camera.position.copy(goalCamPos);
+          controls.target.copy(goalTarget);
+          goalCamPos = null;
+          goalTarget = null;
         }
-
-        controls.update();
-        renderer.render(scene, camera);
-        requestAnimationFrame(animate);
       }
-      animate(0);
 
-      window.addEventListener("resize", () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-      });
-    </script>
-  </body>
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
 </html>
